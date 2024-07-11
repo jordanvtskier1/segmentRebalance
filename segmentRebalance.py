@@ -40,7 +40,7 @@ totalMovesPercent = 5
 runtime = 600
 
 
-def loadData(cols:list):
+def loadData(cols: list):
     # Load assets as df
     path_universal = Path(filepath)
     df = pd.read_excel(path_universal, sheet_name=dataSheetName)
@@ -68,6 +68,10 @@ def loadData(cols:list):
 def runOptimizer(df, funding):
     # Get list of asset types from data
     assetClassList = list(df['mandate_level_2'].value_counts().index)
+
+    # Perform groupby calculations here to speed up runtime in loop
+    groupbyBV = df.groupby(by=["segment"])["bv_gaap"].sum()
+    groupbyMV = df.groupby(by=["segment"])["mv"].sum()
 
     # Create LpProblem object
     prob = pulp.LpProblem("Balance_Segments", pulp.LpMinimize)
@@ -111,38 +115,42 @@ def runOptimizer(df, funding):
         # z[i] >= -(Ax[i] - By[i]) method
         prob += segments_diff[j] >= (
                     pulp.lpSum([df.loc[i, 'bv_gaap'] * asset_vars[(i, j)] for i in df.index]) - getDesiredFunding(
-                j)) / getDesiredFunding(j)
+                j, funding)) / getDesiredFunding(j, funding)
 
-        prob += segments_diff[j] >= (getDesiredFunding(j) - pulp.lpSum(
-            [df.loc[i, 'bv_gaap'] * asset_vars[(i, j)] for i in df.index])) / getDesiredFunding(j)
+        prob += segments_diff[j] >= (getDesiredFunding(j, funding) - pulp.lpSum(
+            [df.loc[i, 'bv_gaap'] * asset_vars[(i, j)] for i in df.index])) / getDesiredFunding(j, funding)
 
         # Constraints: WA Yield stays nearly constant
         prob += pulp.lpSum([df.loc[i, 'by_gaap'] * df.loc[i, 'bv_gaap'] * asset_vars[(i, j)]
-                            for i in df.index]) >= getWAyield(j) * 0.995 * pulp.lpSum(
+                            for i in df.index]) >= getWAyield(j, df, groupbyBV) * 0.995 * pulp.lpSum(
             [df.loc[i, 'bv_gaap'] * asset_vars[(i, j)] for i in df.index])
         prob += pulp.lpSum([df.loc[i, 'by_gaap'] * df.loc[i, 'bv_gaap'] * asset_vars[(i, j)]
-                            for i in df.index]) <= getWAyield(j) * 1.005 * pulp.lpSum(
+                            for i in df.index]) <= getWAyield(j, df, groupbyBV) * 1.005 * pulp.lpSum(
             [df.loc[i, 'bv_gaap'] * asset_vars[(i, j)] for i in df.index])
 
         # Constraints: WA duration stays nearly constant
         prob += pulp.lpSum([df.loc[i, 'effective_duration'] * df.loc[i, 'mv'] * asset_vars[(i, j)]
-                            for i in df.index]) >= getWAduration(j) * 0.995 * pulp.lpSum(
+                            for i in df.index]) >= getWAduration(j, df, groupbyMV) * 0.995 * pulp.lpSum(
             [df.loc[i, 'mv'] * asset_vars[(i, j)] for i in df.index])
         prob += pulp.lpSum([df.loc[i, 'effective_duration'] * df.loc[i, 'mv'] * asset_vars[(i, j)]
-                            for i in df.index]) <= getWAduration(j) * 1.005 * pulp.lpSum(
+                            for i in df.index]) <= getWAduration(j, df, groupbyMV) * 1.005 * pulp.lpSum(
             [df.loc[i, 'mv'] * asset_vars[(i, j)] for i in df.index])
 
         # Constraints: asset class allocation stays nearly constant
-        for assetclass in assetclasslist:
+        for assetclass in assetClassList:
             prob += pulp.lpSum([df.loc[i, 'bv_gaap'] * asset_vars[(i, j)]
                                 for i in df[df['mandate_level_2'] == assetclass].index]) >= getAllocation(j,
-                                                                                                          assetclass) * pulp.lpSum(
+                                                                                                          assetclass,
+                                                                                                          df,
+                                                                                                          groupbyBV) * pulp.lpSum(
                 [df.loc[i, 'bv_gaap'] * asset_vars[(i, j)]
                  for i in df.index]) * 0.98
 
             prob += pulp.lpSum([df.loc[i, 'bv_gaap'] * asset_vars[(i, j)]
                                 for i in df[df['mandate_level_2'] == assetclass].index]) <= getAllocation(j,
-                                                                                                          assetclass) * pulp.lpSum(
+                                                                                                          assetclass,
+                                                                                                          df,
+                                                                                                          groupbyBV) * pulp.lpSum(
                 [df.loc[i, 'bv_gaap'] * asset_vars[(i, j)]
                  for i in df.index]) * 1.02
 
@@ -164,3 +172,26 @@ def runOptimizer(df, funding):
                     df.loc[i, "equal"] = 1
                 else:
                     df.loc[i, "equal"] = 0
+
+
+# HELPER FUNCTIONS:
+# Returns desired funding for segment
+def getDesiredFunding(segment: int, funding: pd.DataFrame):
+    return funding.loc[funding['segment'] == segment, 'desiredlvl'].values[0]
+
+
+# Returns starting WA duration of segment
+def getWAduration(segment: int, df: pd.DataFrame, groupbyMV):
+    return sum(df.loc[i, 'effective_duration'] * df.loc[i, "mv"] / groupbyMV[df.loc[i, 'segment']]
+               for i in df[df['segment'] == segment].index)
+
+
+# Returns starting WA yield of segment
+def getWAyield(segment: int, df: pd.DataFrame, groupbyBV):
+    return sum(df.loc[i, 'by_gaap'] * df.loc[i, "bv_gaap"] / groupbyBV[df.loc[i, 'segment']]
+               for i in df[df['segment'] == segment].index)
+
+
+# Returns percentage allocation
+def getAllocation(segment: int, assetclass: str, df: pd.DataFrame, groupbyBV):
+    return df.loc[(df['segment'] == segment) & (df['mandate_level_2'] == assetclass)]["bv_gaap"].sum() / groupbyBV[segment]

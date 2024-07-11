@@ -4,7 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="817addff-93a5-4f61-9abf-8ed130691035" name="Changes" comment="Start refactor - load data">
+    <list default="true" id="817addff-93a5-4f61-9abf-8ed130691035" name="Changes" comment="Start refactor - add model">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/segmentRebalance.py" beforeDir="false" afterPath="$PROJECT_DIR$/segmentRebalance.py" afterDir="false" />
     </list>
@@ -72,7 +72,15 @@
       <option name="project" value="LOCAL" />
       <updated>1720727560910</updated>
     </task>
-    <option name="localTasksCounter" value="3" />
+    <task id="LOCAL-00003" summary="Start refactor - add model">
+      <option name="closed" value="true" />
+      <created>1720732399856</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1720732399856</updated>
+    </task>
+    <option name="localTasksCounter" value="4" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -89,6 +97,7 @@
   <component name="VcsManagerConfiguration">
     <MESSAGE value="Create project" />
     <MESSAGE value="Start refactor - load data" />
-    <option name="LAST_COMMIT_MESSAGE" value="Start refactor - load data" />
+    <MESSAGE value="Start refactor - add model" />
+    <option name="LAST_COMMIT_MESSAGE" value="Start refactor - add model" />
   </component>
 </project>
