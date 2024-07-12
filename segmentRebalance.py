@@ -17,7 +17,7 @@ fundingSheetName = "Funding Levels for Investments"
 
 # Location of segments and "Net Liabilities or Desired Size" in funding level sheet:
 rows = range(5, 27)
-columns = ['A', 'F']
+excelcolumns = ['A', 'F']
 
 # Segments to balance
 segments = [159, 165, 166, 155]
@@ -39,6 +39,30 @@ totalMovesPercent = 5
 # runtime could improve results.
 runtime = 600
 
+# Percentage the yield is allowed to change from current/target, as a float
+yieldConstraintPercent = 1
+
+# Percentage the duration is allowed to change from current/target, as a float
+durationConstraintPercent = 1
+
+# Percentage the asset class allocation is allowed to change from current/target, as a float
+allocationConstraintPercent = 5
+
+# If desired yield target is different than current, enter values in segment: target format
+# It is not required to enter a target for every segment, the default is the current value.
+# The problem might not be feasable if ambitious targets are entered
+yieldTargetDict = {#155: 4.5,
+                   #165: 5
+                   }
+# Same as above for duration
+durationTargetDict = {#155: 7.5,
+                   #165: 7
+                   }
+
+# Same as above for asset classes, but with format (segment, assetclass): target
+assetclassTargetDict = {#(155, "Corporate"): 61,
+                        #(165, "Muni"): 61
+                   }
 
 def loadData(cols: list):
     # Load assets as df
@@ -69,7 +93,7 @@ def runOptimizer(df, funding):
     # Get list of asset types from data
     assetClassList = list(df['mandate_level_2'].value_counts().index)
 
-    # Perform groupby calculations here to speed up runtime in loop
+    # Perform groupby calculations here to decrease runtime in loop
     groupbyBV = df.groupby(by=["segment"])["bv_gaap"].sum()
     groupbyMV = df.groupby(by=["segment"])["mv"].sum()
 
@@ -182,16 +206,26 @@ def getDesiredFunding(segment: int, funding: pd.DataFrame):
 
 # Returns starting WA duration of segment
 def getWAduration(segment: int, df: pd.DataFrame, groupbyMV):
-    return sum(df.loc[i, 'effective_duration'] * df.loc[i, "mv"] / groupbyMV[df.loc[i, 'segment']]
-               for i in df[df['segment'] == segment].index)
+    try:
+        if durationTargetDict[segment]:
+            return durationTargetDict[segment]
+    except KeyError:
+        return sum(df.loc[i, 'effective_duration'] * df.loc[i, "mv"] / groupbyMV[df.loc[i, 'segment']]
+                   for i in df[df['segment'] == segment].index)
 
 
 # Returns starting WA yield of segment
 def getWAyield(segment: int, df: pd.DataFrame, groupbyBV):
-    return sum(df.loc[i, 'by_gaap'] * df.loc[i, "bv_gaap"] / groupbyBV[df.loc[i, 'segment']]
-               for i in df[df['segment'] == segment].index)
+    try:
+        if yieldTargetDict[segment]:
+            return yieldTargetDict[segment]
+    except KeyError:
+        return sum(df.loc[i, 'by_gaap'] * df.loc[i, "bv_gaap"] / groupbyBV[df.loc[i, 'segment']]
+                   for i in df[df['segment'] == segment].index)
 
+#TODO: add select target to getAllocation and getDesiredFunding
 
 # Returns percentage allocation
 def getAllocation(segment: int, assetclass: str, df: pd.DataFrame, groupbyBV):
     return df.loc[(df['segment'] == segment) & (df['mandate_level_2'] == assetclass)]["bv_gaap"].sum() / groupbyBV[segment]
+
