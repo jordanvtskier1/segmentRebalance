@@ -2,7 +2,6 @@ import pandas as pd
 import numpy as np
 import pulp
 from pulp import PULP_CBC_CMD
-import openpyxl
 from pathlib import Path
 import sys
 
@@ -29,7 +28,8 @@ segments = [159, 165, 166, 155]
 # Limit segment(s) to take assets out of:
 # If left blank, program will default to totalMovesPercent as asset moves constraint,
 # and assets can be moved between all segments
-overFundSegments = [159]
+overFundSegments = [#159
+                    ]
 
 # percentage of assets in portfolio, as a float, that can be moved.
 totalMovesPercent = 5
@@ -87,7 +87,17 @@ def main() -> None:
         case -1:
             sys.exit("Problem is infeasible, loosen constraints or try less aggressive targets")
         case 1:
+            # Print results for funding
+            output_template = "{}   Old funding: {:>13,}   New funding: {:>13,}   Target: {:>13,}   Diff: {:>12,}"
+            for j in funding['segment']:
+                old = df[df['segment'] == j]["bv_gaap"].sum()
+                new = df[df['newSegment'] == j]["bv_gaap"].sum()
+                target = funding[funding['segment'] == j]['desiredlvl'].values[0]
+                diff = target - new
+                print(output_template.format(round(j), round(old), round(new), round(target), round(diff)))
 
+            print("\n\n")
+            # Print results for book yield
             for j in funding['segment']:
                 values = df[df['segment'] == j]['by_gaap']
                 weights = df[df['segment'] == j]['bv_gaap']
@@ -97,8 +107,10 @@ def main() -> None:
                 weights = df[df['newSegment'] == j]['bv_gaap']
                 newrate = np.average(values, weights=weights)
 
-                print(j, "Old BY:", round(rate, 2), "New BY:", round(newrate, 2))
+                print(round(j), " Old BY:", round(rate, 2), "  New BY:", round(newrate, 2))
 
+            print("\n\n")
+            # Print results for duration
             for j in funding['segment']:
                 values = df[df['segment'] == j]['effective_duration']
                 weights = df[df['segment'] == j]['mv']
@@ -108,14 +120,32 @@ def main() -> None:
                 weights = df[df['newSegment'] == j]['mv']
                 newrate = np.average(values, weights=weights)
 
-                print(j, "Old OAD:", round(rate, 2), "New OAD:", round(newrate, 2))
+                print(round(j), " Old OAD:", round(rate, 2), "  New OAD:", round(newrate, 2))
 
+            print("\n\n")
+            # Print results for asset class distribution
+            output_template = "{} {:>25}   %Old: {:>5}    %New: {:>5}    Diff: {:>5}"
+            for segment in funding['segment']:
+                for assetclass in list(df['mandate_level_2'].value_counts().index):
+                    oldsumclass = df.loc[(df['segment'] == segment) & (df['mandate_level_2'] == assetclass)][
+                        "bv_gaap"].sum()
+                    oldsumtotal = df.loc[(df['segment'] == segment)]["bv_gaap"].sum()
+                    old = round(100 * oldsumclass / oldsumtotal, 2)
 
+                    newsumclass = df.loc[(df['newSegment'] == segment) & (df['mandate_level_2'] == assetclass)][
+                        "bv_gaap"].sum()
+                    newsumtotal = df.loc[(df['newSegment'] == segment)]["bv_gaap"].sum()
+                    new = round(100 * newsumclass / newsumtotal, 2)
+
+                    diff = round((old - new), 2)
+                    print(output_template.format(round(segment), assetclass, old, new, diff))
+
+            print(f"\nTotal Assets moved: {df['equal'].value_counts()[0]}")
 
             outpath_universal = Path(outpath)
             df.to_excel(outpath_universal)
 
-            print(f"Output returned to {outpath}.\n")
+            print(f"\nOutput returned to {outpath}")
 
         case -2:
             sys.exit("Problem is unbounded")
@@ -144,8 +174,9 @@ def loadData(cols: list) -> tuple[pd.DataFrame, pd.DataFrame]:
 
     # Filter portfolio for only segments selected for balancing
     df = df[df["segment"].isin(segments)].reset_index()
-    df["uniqueid"] = df.index
     funding = funding[funding["segment"].isin(segments)].reset_index()
+
+    print("Finished loading data")
 
     return df, funding
 
@@ -236,7 +267,9 @@ def runOptimizer(df: pd.DataFrame, funding: pd.DataFrame) -> tuple[pd.DataFrame,
     # Objective: minimize sum of absolute value of percent difference from target funding
     prob += pulp.lpSum(segments_diff[j] for j in segments)
 
-    prob.solve(PULP_CBC_CMD(timeLimit=runtime))
+    print("Finished building optimizer, starting run")
+
+    prob.solve(PULP_CBC_CMD(msg=True, timeLimit=runtime))
 
     # Output the results
     #for v in prob.variables():
@@ -295,3 +328,6 @@ def getAllocation(segment: int, assetclass: str, df: pd.DataFrame) -> float:
         sumclass = df.loc[(df['segment'] == segment) & (df['mandate_level_2'] == assetclass)]["bv_gaap"].sum()
         sumtotal = df.loc[(df['segment'] == segment)]["bv_gaap"].sum()
         return sumclass / sumtotal
+
+
+main()
