@@ -4,6 +4,7 @@ import pulp
 from pulp import PULP_CBC_CMD
 import openpyxl
 from pathlib import Path
+import sys
 
 # GLOBAL VARIABLES
 # windows path to file
@@ -14,6 +15,9 @@ dataSheetName = "nlgcap_holdings_plus"
 
 # Funding target sheet name
 fundingSheetName = "Funding Levels for Investments"
+
+# Outpath
+outpath = r"C:\Users\HB3245\NLG Capital Work\Segment Rebalance\balancedOutput.xlsx"
 
 # Location of segments and "Net Liabilities or Desired Size" in funding level sheet:
 rows = range(5, 27)
@@ -32,8 +36,8 @@ totalMovesPercent = 5
 
 # Run time limit in seconds. Sometimes the optimizer finds the optimum solution in seconds,
 # other times it will run near infinitely. Early stopping often still gives a great solution
-# that is a fraction of a percent off optimum, which I do not think is worth waiting more than
-# 10 minutes for. If the optimizer stops early (final output in terminal: "Result - Stopped on time limit"),
+# that is a fraction of a percent off optimum.
+# If the optimizer stops early (final output in terminal: "Result - Stopped on time limit"),
 # check the Objective value and Lower bound output values. Objective value is the optimum result found within time
 # limits, Lower bound is the best possible result given infinite time. If they are very different, increasing the
 # runtime could improve results.
@@ -50,25 +54,76 @@ allocationConstraintPercent = 5
 
 # If desired yield target is different than current, enter values in segment: target format
 # It is not required to enter a target for every segment, the default is the current value.
-# The problem might not be feasable if ambitious targets are entered
+# The problem might not be feasible if ambitious targets are entered
 yieldTargetDict = {#155: 4.5,
                    #165: 5
                    }
 
-# Same as above for desired segment size
-fundingTargetDict = {#155: 700000000,
-                     #165: 5400000000
-                     }
 
 # Same as above for duration
 durationTargetDict = {#155: 7.5,
-                   #165: 7
-                   }
+                      #165: 7
+                      }
 
 # Same as above for asset classes, but with format (segment, assetclass): target
 assetclassTargetDict = {#(155, "Corporate"): 61,
                         #(165, "Muni"): 61
-                   }
+                        }
+
+# There shouldn't be a reason to want to change the desired funding target, but if there is this is here just in case
+fundingTargetDict = {#155: 700000000,
+                     #165: 5400000000
+                     }
+
+def main() -> None:
+    # load dataframe
+    df, funding = loadData(excelcolumns)
+
+    df, status = runOptimizer(df, funding)
+
+    match status:
+        case 0:
+            sys.exit("Problem not solved, try increasing runtime")
+        case -1:
+            sys.exit("Problem is infeasible, loosen constraints or try less aggressive targets")
+        case 1:
+
+            for j in funding['segment']:
+                values = df[df['segment'] == j]['by_gaap']
+                weights = df[df['segment'] == j]['bv_gaap']
+                rate = np.average(values, weights=weights)
+
+                values = df[df['newSegment'] == j]['by_gaap']
+                weights = df[df['newSegment'] == j]['bv_gaap']
+                newrate = np.average(values, weights=weights)
+
+                print(j, "Old BY:", round(rate, 2), "New BY:", round(newrate, 2))
+
+            for j in funding['segment']:
+                values = df[df['segment'] == j]['effective_duration']
+                weights = df[df['segment'] == j]['mv']
+                rate = np.average(values, weights=weights)
+
+                values = df[df['newSegment'] == j]['effective_duration']
+                weights = df[df['newSegment'] == j]['mv']
+                newrate = np.average(values, weights=weights)
+
+                print(j, "Old OAD:", round(rate, 2), "New OAD:", round(newrate, 2))
+
+
+
+            outpath_universal = Path(outpath)
+            df.to_excel(outpath_universal)
+
+            print(f"Output returned to {outpath}.\n")
+
+        case -2:
+            sys.exit("Problem is unbounded")
+        case -3:
+            sys.exit("Problem is undefined")
+        case _:
+            sys.exit(f"Unknown error code: {status}")
+
 
 def loadData(cols: list) -> tuple[pd.DataFrame, pd.DataFrame]:
     # Load assets as df
@@ -95,32 +150,28 @@ def loadData(cols: list) -> tuple[pd.DataFrame, pd.DataFrame]:
     return df, funding
 
 
-def runOptimizer(df: pd.DataFrame, funding: pd.DataFrame):
+def runOptimizer(df: pd.DataFrame, funding: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     # Get list of asset types from data
     assetClassList = list(df['mandate_level_2'].value_counts().index)
-
-    # Perform groupby calculations here to decrease runtime in loop
-    groupbyBV = df.groupby(by=["segment"])["bv_gaap"].sum()
-    groupbyMV = df.groupby(by=["segment"])["mv"].sum()
 
     # Create LpProblem object
     prob = pulp.LpProblem("Balance_Segments", pulp.LpMinimize)
     # Define decision variables
     asset_vars = pulp.LpVariable.dicts("asset",
-                                   ((i, j) for i in df.index for j in funding['segment']),
-                                   cat='Binary')
+                                       ((i, j) for i in df.index for j in funding['segment']),
+                                       cat='Binary')
     # Variable to minimize. Equal to segment value difference from desired value
     segments_diff = pulp.LpVariable.dicts('segments_diff', segments, cat='Continuous')
 
     # Create dictionary with current asset allocation
     asset_set = {}
     for i in df.index:
-        realalloc = df.loc[i,'segment']
+        realalloc = df.loc[i, 'segment']
         for j in funding['segment']:
             if j == realalloc:
-                asset_set[(i,j)] = 1
+                asset_set[(i, j)] = 1
             else:
-                asset_set[(i,j)] = 0
+                asset_set[(i, j)] = 0
 
     # CONSTRAINTS:
 
@@ -128,12 +179,12 @@ def runOptimizer(df: pd.DataFrame, funding: pd.DataFrame):
     if overFundSegments:
         for i in df[~df['segment'].isin(overFundSegments)].index:
             for j in segments:
-                prob += asset_vars[i, j] == asset_set[(i,j)]
+                prob += asset_vars[i, j] == asset_set[(i, j)]
 
     # Only move below totalMovesPercent of loan
-    prob += pulp.lpSum([asset_vars[i, j] * asset_set[(i,j)]
+    prob += pulp.lpSum([asset_vars[i, j] * asset_set[(i, j)]
                         for i in df.index
-                        for j in funding['segment']]) >= int(len(df)*(1-(totalMovesPercent/100)))
+                        for j in funding['segment']]) >= int(len(df) * (1 - (totalMovesPercent / 100)))
 
     # Each loan can only be assigned to one segment
     for i in df.index:
@@ -144,26 +195,26 @@ def runOptimizer(df: pd.DataFrame, funding: pd.DataFrame):
         # z[i] >= Ax[i] - By[i]
         # z[i] >= -(Ax[i] - By[i]) method
         prob += segments_diff[j] >= (
-                    pulp.lpSum([df.loc[i, 'bv_gaap'] * asset_vars[(i, j)] for i in df.index]) - getDesiredFunding(
-                j, funding)) / getDesiredFunding(j, funding)
+                pulp.lpSum([df.loc[i, 'bv_gaap'] * asset_vars[(i, j)] for i in df.index]) - getDesiredFunding(
+            j, funding)) / getDesiredFunding(j, funding)
 
         prob += segments_diff[j] >= (getDesiredFunding(j, funding) - pulp.lpSum(
             [df.loc[i, 'bv_gaap'] * asset_vars[(i, j)] for i in df.index])) / getDesiredFunding(j, funding)
 
         # Constraints: WA Yield stays nearly constant
         prob += pulp.lpSum([df.loc[i, 'by_gaap'] * df.loc[i, 'bv_gaap'] * asset_vars[(i, j)]
-                            for i in df.index]) >= getWAyield(j, df, groupbyBV) * 0.995 * pulp.lpSum(
+                            for i in df.index]) >= getWAyield(j, df) * (1-yieldConstraintPercent/100) * pulp.lpSum(
             [df.loc[i, 'bv_gaap'] * asset_vars[(i, j)] for i in df.index])
         prob += pulp.lpSum([df.loc[i, 'by_gaap'] * df.loc[i, 'bv_gaap'] * asset_vars[(i, j)]
-                            for i in df.index]) <= getWAyield(j, df, groupbyBV) * 1.005 * pulp.lpSum(
+                            for i in df.index]) <= getWAyield(j, df) * (1+yieldConstraintPercent/100) * pulp.lpSum(
             [df.loc[i, 'bv_gaap'] * asset_vars[(i, j)] for i in df.index])
 
         # Constraints: WA duration stays nearly constant
         prob += pulp.lpSum([df.loc[i, 'effective_duration'] * df.loc[i, 'mv'] * asset_vars[(i, j)]
-                            for i in df.index]) >= getWAduration(j, df, groupbyMV) * 0.995 * pulp.lpSum(
+                            for i in df.index]) >= getWAduration(j, df) * (1-durationConstraintPercent/100) * pulp.lpSum(
             [df.loc[i, 'mv'] * asset_vars[(i, j)] for i in df.index])
         prob += pulp.lpSum([df.loc[i, 'effective_duration'] * df.loc[i, 'mv'] * asset_vars[(i, j)]
-                            for i in df.index]) <= getWAduration(j, df, groupbyMV) * 1.005 * pulp.lpSum(
+                            for i in df.index]) <= getWAduration(j, df) * (1+durationConstraintPercent/100) * pulp.lpSum(
             [df.loc[i, 'mv'] * asset_vars[(i, j)] for i in df.index])
 
         # Constraints: asset class allocation stays nearly constant
@@ -171,18 +222,16 @@ def runOptimizer(df: pd.DataFrame, funding: pd.DataFrame):
             prob += pulp.lpSum([df.loc[i, 'bv_gaap'] * asset_vars[(i, j)]
                                 for i in df[df['mandate_level_2'] == assetclass].index]) >= getAllocation(j,
                                                                                                           assetclass,
-                                                                                                          df,
-                                                                                                          groupbyBV) * pulp.lpSum(
+                                                                                                          df) * pulp.lpSum(
                 [df.loc[i, 'bv_gaap'] * asset_vars[(i, j)]
-                 for i in df.index]) * 0.98
+                 for i in df.index]) * (1-allocationConstraintPercent/100)
 
             prob += pulp.lpSum([df.loc[i, 'bv_gaap'] * asset_vars[(i, j)]
                                 for i in df[df['mandate_level_2'] == assetclass].index]) <= getAllocation(j,
                                                                                                           assetclass,
-                                                                                                          df,
-                                                                                                          groupbyBV) * pulp.lpSum(
+                                                                                                          df) * pulp.lpSum(
                 [df.loc[i, 'bv_gaap'] * asset_vars[(i, j)]
-                 for i in df.index]) * 1.02
+                 for i in df.index]) * (1+allocationConstraintPercent/100)
 
     # Objective: minimize sum of absolute value of percent difference from target funding
     prob += pulp.lpSum(segments_diff[j] for j in segments)
@@ -190,8 +239,8 @@ def runOptimizer(df: pd.DataFrame, funding: pd.DataFrame):
     prob.solve(PULP_CBC_CMD(timeLimit=runtime))
 
     # Output the results
-    for v in prob.variables():
-        print(v.name, "=", v.varValue)
+    #for v in prob.variables():
+        #print(v.name, "=", v.varValue)
 
     # Get the new asset distribution
     for i in df.index:
@@ -202,6 +251,7 @@ def runOptimizer(df: pd.DataFrame, funding: pd.DataFrame):
                     df.loc[i, "equal"] = 1
                 else:
                     df.loc[i, "equal"] = 0
+    return df, prob.status
 
 
 # HELPER FUNCTIONS:
@@ -215,32 +265,33 @@ def getDesiredFunding(segment: int, funding: pd.DataFrame) -> float:
 
 
 # Returns starting WA duration of segment
-def getWAduration(segment: int, df: pd.DataFrame, groupbyMV: pd.Series) -> float:
+def getWAduration(segment: int, df: pd.DataFrame) -> float:
     try:
         if durationTargetDict[segment]:
             return durationTargetDict[segment]
     except KeyError:
-        return sum(df.loc[i, 'effective_duration'] * df.loc[i, "mv"] / groupbyMV[segment]
-                   for i in df[df['segment'] == segment].index)
+        values = df[df['segment'] == segment]['effective_duration']
+        weights = df[df['segment'] == segment]['mv']
+        return np.average(values, weights=weights)
 
 
 # Returns starting WA yield of segment
-def getWAyield(segment: int, df: pd.DataFrame, groupbyBV: pd.Series) -> float:
+def getWAyield(segment: int, df: pd.DataFrame) -> float:
     try:
         if yieldTargetDict[segment]:
             return yieldTargetDict[segment]
     except KeyError:
-        return sum(df.loc[i, 'by_gaap'] * df.loc[i, "bv_gaap"] / groupbyBV[segment]
-                   for i in df[df['segment'] == segment].index)
+        values = df[df['segment'] == segment]['by_gaap']
+        weights = df[df['segment'] == segment]['bv_gaap']
+        return np.average(values, weights=weights)
 
 
 # Returns percentage allocation
-def getAllocation(segment: int, assetclass: str, df: pd.DataFrame, groupbyBV: pd.Series) -> float:
+def getAllocation(segment: int, assetclass: str, df: pd.DataFrame) -> float:
     try:
         if assetclassTargetDict[(segment, assetclass)]:
             return assetclassTargetDict[(segment, assetclass)] / 100
     except KeyError:
-        return df.loc[(df['segment'] == segment) & (df['mandate_level_2'] == assetclass)]["bv_gaap"].sum() / groupbyBV[segment]
-
-
-
+        sumclass = df.loc[(df['segment'] == segment) & (df['mandate_level_2'] == assetclass)]["bv_gaap"].sum()
+        sumtotal = df.loc[(df['segment'] == segment)]["bv_gaap"].sum()
+        return sumclass / sumtotal

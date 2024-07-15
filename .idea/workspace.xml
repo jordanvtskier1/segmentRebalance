@@ -4,7 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="817addff-93a5-4f61-9abf-8ed130691035" name="Changes" comment="Start refactor - edit helper functions">
+    <list default="true" id="817addff-93a5-4f61-9abf-8ed130691035" name="Changes" comment="Start refactor - finalize helper functions">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/segmentRebalance.py" beforeDir="false" afterPath="$PROJECT_DIR$/segmentRebalance.py" afterDir="false" />
     </list>
@@ -96,7 +96,15 @@
       <option name="project" value="LOCAL" />
       <updated>1720814728188</updated>
     </task>
-    <option name="localTasksCounter" value="6" />
+    <task id="LOCAL-00006" summary="Start refactor - finalize helper functions">
+      <option name="closed" value="true" />
+      <created>1721047737696</created>
+      <option name="number" value="00006" />
+      <option name="presentableId" value="LOCAL-00006" />
+      <option name="project" value="LOCAL" />
+      <updated>1721047737696</updated>
+    </task>
+    <option name="localTasksCounter" value="7" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -116,6 +124,7 @@
     <MESSAGE value="Start refactor - add model" />
     <MESSAGE value="Start refactor - add helper functions" />
     <MESSAGE value="Start refactor - edit helper functions" />
-    <option name="LAST_COMMIT_MESSAGE" value="Start refactor - edit helper functions" />
+    <MESSAGE value="Start refactor - finalize helper functions" />
+    <option name="LAST_COMMIT_MESSAGE" value="Start refactor - finalize helper functions" />
   </component>
 </project>
